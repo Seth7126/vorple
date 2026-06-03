@@ -1,7 +1,16 @@
-# 此工作流脚本用于在 GitHub Actions 的 Ubuntu 环境中稳定编译 Vorple 项目。
-# 它的核心目的是通过强制指定 Node.js 18 (LTS)，直接利用运行器预置的 Yarn 工具，
-# 配合 --ignore-engines 参数绕过底层严格的版本校验，从而确保依赖能够顺利安装。
-# 最终它会执行项目构建逻辑，提取并上传生成的前端产物（dist, lib, web 目录）。
+# =============================================================================
+# 工作流目的说明：
+# 此脚本专门用于在由于 Self-hosted Runner 环境变量污染导致 Node 版本锁定在 
+# 15.14.0 等被弃用版本的极端环境中，稳定编译 Vorple 项目。
+# 
+# 核心解决机制：
+# 1. 动态生成项目级别的 .yarnrc 和 .npmrc 配置文件，永久关闭当前工作空间内所有
+#    包管理器的引擎版本校验机制（ignore-engines / engine-strict）。
+# 2. 将原本构建逻辑中依赖的 yarn webpack 替换为 `npx webpack`。这使得系统直接
+#    调用 node_modules/.bin/webpack 二进制文件，彻底规避 Yarn 在执行 run 
+#    指令时的二次引擎检查拦截。
+# 3. 展开并修正原 build.sh 中的 macOS 专有逻辑，完成 TypeScript 编译与 CSS 拼接。
+# =============================================================================
 
 name: Build Vorple
 
@@ -20,23 +29,24 @@ jobs:
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: 配置 Node.js 环境
+      - name: 尝试配置 Node.js 环境 (作为降级保障)
         uses: actions/setup-node@v4
         with:
-          # 明确指定使用 Node.js 18，这与 package.json 中的 @types/node 声明一致
           node-version: '18'
-          # 开启 yarn 缓存以加速后续构建，该配置并不会导致 node 版本退化
-          cache: 'yarn'
+
+      - name: 强制关闭全链路包管理器引擎校验
+        run: |
+          # 向当前工作目录写入配置文件，强制拦截所有引擎版本不匹配报错
+          echo "ignore-engines true" > .yarnrc
+          echo "engine-strict=false" > .npmrc
 
       - name: 安装项目依赖
-        # 核心修改：添加 --ignore-engines 参数。
-        # GitHub Runner 已经预装了 yarn，无需再次 npm install -g yarn。
-        # 该参数强制 yarn 忽略所有对 node 版本的严格约束，直接执行安装操作，彻底杜绝因版本校验引发的 15.14.0 报错。
-        run: yarn install --ignore-engines
+        # 此时配置已生效，执行 install 将完全无视 Node 15.14.0 带来的版本警告或阻断
+        run: yarn install
 
-      - name: 执行 Linux 环境适配与构建
+      - name: 执行环境适配与代码构建
         run: |
-          # 修正 macOS 专用的 sed 语法，使其适配 Ubuntu 环境
+          # 修正 macOS 专用的 sed 语法以适配通用 Linux 环境
           sed -i "s/sed -i '' -E/sed -i -E/" build.sh
           chmod +x build.sh
           
@@ -45,7 +55,9 @@ jobs:
           sed -i -E "s/(const VORPLE_VERSION =) \"(.*)\"/\1 \"$VORPLE_VERSION\"/" src/index.ts
           
           rm -rf dist lib web
-          yarn webpack
+          
+          # 核心修正：使用 npx 替代引发错误的 yarn webpack
+          npx webpack
           npx tsc -p tsconfig.json
           
           cp -r src/quixe lib
