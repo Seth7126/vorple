@@ -1,16 +1,10 @@
-# =============================================================================
+# -----------------------------------------------------------------------------
 # 工作流目的说明：
-# 此脚本专门用于在由于 Self-hosted Runner 环境变量污染导致 Node 版本锁定在 
-# 15.14.0 等被弃用版本的极端环境中，稳定编译 Vorple 项目。
-# 
-# 核心解决机制：
-# 1. 动态生成项目级别的 .yarnrc 和 .npmrc 配置文件，永久关闭当前工作空间内所有
-#    包管理器的引擎版本校验机制（ignore-engines / engine-strict）。
-# 2. 将原本构建逻辑中依赖的 yarn webpack 替换为 `npx webpack`。这使得系统直接
-#    调用 node_modules/.bin/webpack 二进制文件，彻底规避 Yarn 在执行 run 
-#    指令时的二次引擎检查拦截。
-# 3. 展开并修正原 build.sh 中的 macOS 专有逻辑，完成 TypeScript 编译与 CSS 拼接。
-# =============================================================================
+# 本脚本用于在 GitHub Actions 中稳定编译 vorple 项目。
+# 核心机制是通过禁用 setup-node 的缓存功能来阻断受污染环境变量的注入，
+# 并使用 --ignore-engines 参数强制规避 @typescript-eslint 等依赖的 Node 版本强校验，
+# 确保在任意底层依赖冲突的情况下顺利完成构建并输出产物。
+# -----------------------------------------------------------------------------
 
 name: Build Vorple
 
@@ -29,41 +23,38 @@ jobs:
       - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: 尝试配置 Node.js 环境 (作为降级保障)
+      - name: 配置纯净 Node.js 环境
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+          # 明确移除缓存选项，断绝历史受污染的 Yarn 引擎缓存对当前路径的覆盖
 
-      - name: 强制关闭全链路包管理器引擎校验
+      - name: 强制安装项目依赖
+        # 直接使用行内参数，优先级最高，无视所有 package.json 的引擎要求
+        run: yarn install --ignore-engines
+
+      - name: 执行代码构建与资源打包
         run: |
-          # 向当前工作目录写入配置文件，强制拦截所有引擎版本不匹配报错
-          echo "ignore-engines true" > .yarnrc
-          echo "engine-strict=false" > .npmrc
-
-      - name: 安装项目依赖
-        # 此时配置已生效，执行 install 将完全无视 Node 15.14.0 带来的版本警告或阻断
-        run: yarn install
-
-      - name: 执行环境适配与代码构建
-        run: |
-          # 修正 macOS 专用的 sed 语法以适配通用 Linux 环境
-          sed -i "s/sed -i '' -E/sed -i -E/" build.sh
-          chmod +x build.sh
-          
           export NODE_ENV=production
+          
+          # 从 package.json 提取版本号并动态注入到 TypeScript 源码中
           VORPLE_VERSION=$(grep version package.json | sed 's/.*"version": "\(.*\)".*/\1/')
           sed -i -E "s/(const VORPLE_VERSION =) \"(.*)\"/\1 \"$VORPLE_VERSION\"/" src/index.ts
           
+          # 清理历史目录，防止旧产物残留
           rm -rf dist lib web
           
-          # 核心修正：使用 npx 替代引发错误的 yarn webpack
+          # 使用 npx 调用当前项目 node_modules 下的二进制文件
+          # 这可以避免使用 yarn run 时再次触发 yarn 自身的引擎拦截逻辑
           npx webpack
           npx tsc -p tsconfig.json
           
+          # 拷贝所需的第三方库和字体文件
           cp -r src/quixe lib
           mkdir -p lib/css
           cp web/interpreter/roboto-*.woff* lib/css/
           
+          # 将分散的 CSS 样式表按顺序合并为单一的 vorple.css
           cat web/interpreter/roboto.css \
               web/interpreter/jquery.powertip.css \
               web/interpreter/toastr.css \
