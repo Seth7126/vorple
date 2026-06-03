@@ -18,19 +18,13 @@ jobs:
       - name: Setup Node.js  
         uses: actions/setup-node@v4  
         with:  
-          node-version: '14.17.0'  
-          cache: 'yarn'  
+          node-version: '18'  
   
       - name: Install Yarn  
         run: npm install -g yarn  
   
       - name: Install dependencies  
         run: yarn install  
-  
-      - name: Patch build.sh for Linux (fix macOS-specific sed syntax)  
-        run: |  
-          sed -i "s/sed -i '' -E/sed -i -E/" build.sh  
-          chmod +x build.sh  
   
       - name: Build  
         run: |  
