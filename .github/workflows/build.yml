@@ -1,56 +1,71 @@
-name: Build Vorple  
-  
-on:  
-  push:  
-    branches: [ main, master ]  
-  pull_request:  
-    branches: [ main, master ]  
-  workflow_dispatch:  
-  
-jobs:  
-  build:  
-    runs-on: ubuntu-latest  
-  
-    steps:  
-      - name: Checkout repository  
-        uses: actions/checkout@v4  
-  
-      - name: Setup Node.js  
-        uses: actions/setup-node@v4  
-        with:  
-          node-version: '18'  
-  
-      - name: Install Yarn  
-        run: npm install -g yarn  
-  
-      - name: Install dependencies  
-        run: yarn install  
-  
-      - name: Build  
-        run: |  
-          export NODE_ENV=production  
-          VORPLE_VERSION=$(grep version package.json | sed 's/.*"version": "\(.*\)".*/\1/')  
-          sed -i -E "s/(const VORPLE_VERSION =) \"(.*)\"/\1 \"$VORPLE_VERSION\"/" src/index.ts  
-          rm -rf dist lib web  
-          yarn webpack  
-          npx tsc -p tsconfig.json  
-          cp -r src/quixe lib  
-          mkdir -p lib/css  
-          cp web/interpreter/roboto-*.woff* lib/css/  
-          cat web/interpreter/roboto.css \  
-              web/interpreter/jquery.powertip.css \  
-              web/interpreter/toastr.css \  
-              web/interpreter/vex.css \  
-              web/interpreter/vex-theme-plain.css \  
-              web/interpreter/haven.css \  
-              web/interpreter/vorple.css > lib/css/vorple.css  
-  
-      - name: Upload build artifacts  
-        uses: actions/upload-artifact@v4  
-        with:  
-          name: vorple-build  
-          path: |  
-            dist/  
-            lib/  
-            web/  
+# 此工作流脚本用于在 GitHub Actions 的 Ubuntu 环境中稳定编译 Vorple 项目。
+# 它的核心目的是通过强制指定 Node.js 18 (LTS)，直接利用运行器预置的 Yarn 工具，
+# 配合 --ignore-engines 参数绕过底层严格的版本校验，从而确保依赖能够顺利安装。
+# 最终它会执行项目构建逻辑，提取并上传生成的前端产物（dist, lib, web 目录）。
+
+name: Build Vorple
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js 环境
+        uses: actions/setup-node@v4
+        with:
+          # 明确指定使用 Node.js 18，这与 package.json 中的 @types/node 声明一致
+          node-version: '18'
+          # 开启 yarn 缓存以加速后续构建，该配置并不会导致 node 版本退化
+          cache: 'yarn'
+
+      - name: 安装项目依赖
+        # 核心修改：添加 --ignore-engines 参数。
+        # GitHub Runner 已经预装了 yarn，无需再次 npm install -g yarn。
+        # 该参数强制 yarn 忽略所有对 node 版本的严格约束，直接执行安装操作，彻底杜绝因版本校验引发的 15.14.0 报错。
+        run: yarn install --ignore-engines
+
+      - name: 执行 Linux 环境适配与构建
+        run: |
+          # 修正 macOS 专用的 sed 语法，使其适配 Ubuntu 环境
+          sed -i "s/sed -i '' -E/sed -i -E/" build.sh
+          chmod +x build.sh
+          
+          export NODE_ENV=production
+          VORPLE_VERSION=$(grep version package.json | sed 's/.*"version": "\(.*\)".*/\1/')
+          sed -i -E "s/(const VORPLE_VERSION =) \"(.*)\"/\1 \"$VORPLE_VERSION\"/" src/index.ts
+          
+          rm -rf dist lib web
+          yarn webpack
+          npx tsc -p tsconfig.json
+          
+          cp -r src/quixe lib
+          mkdir -p lib/css
+          cp web/interpreter/roboto-*.woff* lib/css/
+          
+          cat web/interpreter/roboto.css \
+              web/interpreter/jquery.powertip.css \
+              web/interpreter/toastr.css \
+              web/interpreter/vex.css \
+              web/interpreter/vex-theme-plain.css \
+              web/interpreter/haven.css \
+              web/interpreter/vorple.css > lib/css/vorple.css
+
+      - name: 收集并上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: vorple-build
+          path: |
+            dist/
+            lib/
+            web/
           retention-days: 30
