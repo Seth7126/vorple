@@ -28,6 +28,10 @@ jobs:
         with:
           node-version: '18'
           # 明确移除缓存选项，断绝历史受污染的 Yarn 引擎缓存对当前路径的覆盖
+      - name: 克隆 Haven 解释器源码（固定 commit）  
+        run: |  
+          git clone https://github.com/vorple/haven.git src/haven  
+          cd src/haven && git checkout fbdedfb87d17ebbff252f4fbf9f3d874f75c17e4
 
       - name: 强制安装项目依赖
         # 直接使用行内参数，优先级最高，无视所有 package.json 的引擎要求
