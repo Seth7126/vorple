@@ -1,0 +1,62 @@
+name: Build Vorple  
+  
+on:  
+  push:  
+    branches: [ main, master ]  
+  pull_request:  
+    branches: [ main, master ]  
+  workflow_dispatch:  
+  
+jobs:  
+  build:  
+    runs-on: ubuntu-latest  
+  
+    steps:  
+      - name: Checkout repository  
+        uses: actions/checkout@v4  
+  
+      - name: Setup Node.js  
+        uses: actions/setup-node@v4  
+        with:  
+          node-version: '18'  
+          cache: 'yarn'  
+  
+      - name: Install Yarn  
+        run: npm install -g yarn  
+  
+      - name: Install dependencies  
+        run: yarn install  
+  
+      - name: Patch build.sh for Linux (fix macOS-specific sed syntax)  
+        run: |  
+          sed -i "s/sed -i '' -E/sed -i -E/" build.sh  
+          chmod +x build.sh  
+  
+      - name: Build  
+        run: |  
+          export NODE_ENV=production  
+          VORPLE_VERSION=$(grep version package.json | sed 's/.*"version": "\(.*\)".*/\1/')  
+          sed -i -E "s/(const VORPLE_VERSION =) \"(.*)\"/\1 \"$VORPLE_VERSION\"/" src/index.ts  
+          rm -rf dist lib web  
+          yarn webpack  
+          npx tsc -p tsconfig.json  
+          cp -r src/quixe lib  
+          mkdir -p lib/css  
+          cp web/interpreter/roboto-*.woff* lib/css/  
+          cat web/interpreter/roboto.css \  
+              web/interpreter/jquery.powertip.css \  
+              web/interpreter/toastr.css \  
+              web/interpreter/vex.css \  
+              web/interpreter/vex-theme-plain.css \  
+              web/interpreter/haven.css \  
+              web/interpreter/vorple.css > lib/css/vorple.css  
+  
+      - name: Upload build artifacts  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: vorple-build  
+          path: |  
+            dist/  
+            lib/  
+            web/  
+          retention-days: 30
